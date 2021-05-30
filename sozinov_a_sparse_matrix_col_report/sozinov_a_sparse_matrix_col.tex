@@ -1,0 +1,624 @@
+\documentclass{report}
+
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{luainputenc}
+\usepackage[english, russian]{babel}
+\usepackage[pdftex]{hyperref}
+\usepackage[14pt]{extsizes}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{indentfirst}
+
+\geometry{a4paper,top=2cm,bottom=3cm,left=2cm,right=1.5cm}
+\setlength{\parskip}{0.5cm}
+\setlist{nolistsep, itemsep=0.3cm,parsep=0pt}
+
+\lstset{language=C++,
+		basicstyle=\footnotesize,
+		keywordstyle=\color{blue}\ttfamily,
+		stringstyle=\color{red}\ttfamily,
+		commentstyle=\color{green}\ttfamily,
+		morecomment=[l][\color{magenta}]{\#}, 
+		tabsize=4,
+		breaklines=true,
+  		breakatwhitespace=true,
+  		title=\lstname,       
+}
+
+\makeatletter
+\renewcommand\@biblabel[1]{#1.\hfil}
+\makeatother
+
+\begin{document}
+
+\begin{titlepage}
+
+\begin{center}Министерство образования и науки Российской Федерации 
+Федеральное государственное автономное образовательное учреждение 
+высшего образования \\ Национальный исследовательский 
+Нижегородский государственный университет им. Н.И. Лобачевского 
+Институт информационных технологий, математики и механики
+
+\vspace{8em}
+\textbf{\LargeОтчет по лабораторной работе "Умножение разреженных матриц"} \end{center}
+
+\vspace{8em}
+
+\begin{flushright}  \textbf{Выполнил:} \\ студент группы 381808-1  \\ Созинов А.П. \end{flushright}
+\begin{flushright}  \textbf{Проверил:}  \\ доцент кафедры МОСТ, \\ кандидат технических наук \\ Сысоев А. В.\\ \end{flushright}
+
+\vspace{\fill}
+\begin{center} Нижний Новгород  2020г \end{center}
+\end{titlepage}
+
+\setcounter{page}{2}
+
+% Содержание
+\tableofcontents
+
+\newpage
+% Введение
+\section*{Введение}
+\addcontentsline{toc}{section}{Введение}
+\par Алгебра разреженных матриц - важный раздел математики, имеющий практическое применение. Разреженные матрицы
+встречаются при постановке и решении задач в различных научных и технических областях (при постановке и решении оптимизационных задач,
+при численном решении дифференциальных уравненийв частных производных).
+\par Целью лабораторной работы является изучение принципа хранения и алгоритмов обработки разреженных матриц. Реализовать алгоритм умножения разреженных матриц с использованием технологии MPI для параллельного вычисления.
+\par В данной работе в качестве структуры хранения матрицы был выбран столбцовый вариант - CCS. 
+
+\newpage
+% Постановка задачи
+\section*{Постановка задачи}
+\addcontentsline{toc}{section}{Постановка задачи}
+\par Пусть A и B – матрицы размера M x N и N x K, в которых процент ненулевых элементов мал. Будем считать, что элементы матриц A и B – вещественные числа (далее в программной реализации будем использовать числа с плавающей точкой двойной точности).
+\par Требуется найти матрицу C = A * B, где символ * соответствует матричному умножению.
+\par Для этого нужно выполнить следующие задачи:
+\begin{enumerate}
+\item Разработать структуру хранения разреженной матрицы;
+\item Разработать алгоритм перемножения матрицы;
+\item Проверить на работоспособность с помощью библиотеки модульного тестирования Google Testing Framework.
+\end{enumerate}
+\newpage
+
+% Описание алгоритма
+\section*{Описание алгоритма}
+\addcontentsline{toc}{section}{Описание алгоритма}
+\par Алгоритм умножения разреженных матриц выполним по определению (для каждой ячейки вычисляется скалярное произведение строки одной матрицы на столбцы другой матрицы). 
+\par Так как для хранения матрицы был выбран столбцовый вариант, то и алгоритм будет проходить по столбцам результирующей матрицы для последовательного заполнения значений
+\par Из недостатков можно отметить не удобное выделение элементов строки первой матрицы.
+
+\newpage
+% Схема распараллеливания
+\section*{Схема распараллеливания}
+\addcontentsline{toc}{section}{Схема распараллеливания}
+\par Имеем матрицы A - M x N и В - N x K. 
+\par Для распараллеливания алгоритма умножения CCS-матриц необходимо:
+\begin{enumerate}
+\item Убедиться, что количество столбцов  матрицы A равно количеству строк матрицы B
+\item Распределить K столбцов между процессами
+\item Для каждой матрицы M x $K_i$, где i - номер процесса, вычисляем значения ее ячеек.
+\item Следующим шагом собираем данные в корневой процесс и устанавливаем корректные стартовые позиции для каждого столбца.
+\end{enumerate}
+\newpage
+
+% Описание программной реализации
+\section*{Описание программной реализации}
+\addcontentsline{toc}{section}{Описание программной реализации}
+В программе имеются следующие функции и структуры
+\begin{enumerate}
+\item Структура хранения
+\begin{lstlisting}
+	struct ComprColStorage {
+		int countRow;
+  		int countCol;
+  		std::vector<double> value;
+  		std::vector<int> startPos;
+		std::vector<int> numberRow;
+\end{lstlisting}
+
+\item Функция генерации матрицы
+\begin{lstlisting}
+	ComprColStorage GenerateMatrix(int countRow, int countCol, double proc);
+\end{lstlisting}
+
+\item Последовательная реализация алгоритма
+\begin{lstlisting}
+	ComprColStorage GetSequentialSolution(ComprColStorage *first, ComprColStorage *second);
+\end{lstlisting}
+
+\item Параллельная реализация алгоритма
+\begin{lstlisting}
+	ComprColStorage GetParalSolution(ComprColStorage *first, ComprColStorage *second);
+\end{lstlisting}
+
+\item Функция нахождения значения для ячейки результирующей матрицы
+\begin{lstlisting}
+	double Sum(const ComprColStorage &first, const ComprColStorage &second, int curRow, int curCol, int size);
+\end{lstlisting}
+
+\item Функция вывода матрицы на экран
+Стоит обратить внимание, что данный метод выводит ее в следующем формате:
+кличество строк, количество столбцов\\ стартовые позиции\\строки, в которых находятся значения\\значения матрицы\\
+\begin{lstlisting}
+	void PrintMatr(const ComprColStorage &matr);
+\end{lstlisting}
+
+\end{enumerate}
+\newpage
+
+% Результаты экспериментов
+\section*{Результаты экспериментов}
+\addcontentsline{toc}{section}{Результаты экспериментов}
+Эксперименты проводились на устройстве со следующей конфигурацией:
+\begin{enumerate}
+\item Процессор: Intel Core i5-2410M, 2300 МГц, ядер - 2;
+\item Оперативная память:  4Гб, DDR3;
+\item ОС: Windows 10;
+\end{enumerate}
+ Результаты экспериментов приведены в таблице:
+
+\begin{table}[!h]
+\caption{Результаты вычислительных экспериментов}
+\centering
+\begin{tabular}{ | l | l | l | l  | l | l | }
+\hline
+Процессы & Матрица А & Матрица В & \% заполнения & Последовательно & Параллельно \\ \hline
+1 & 500x500 & 500x500 & 17 & 48.490 & 48.640 \\ \hline
+2 & 500x500 & 500x500 & 17 & 50.250 & 25.423 \\ \hline
+3 & 500x500 & 500x500 & 17 & 52.137 & 20.053 \\ \hline
+4 & 500x500 & 500x500 & 17 & 53.283 & 15.235 \\ \hline
+1 & 300x600 & 600x200 & 18.5 & 10.273 & 10.157 \\ \hline
+2 & 300x600 & 600x200 & 18.5 & 11.471 & 5.415 \\ \hline
+3 & 300x600 & 600x200 & 18.5 & 11.582 & 3.574 \\ \hline
+4 & 300x600 & 600x200 & 18.5 & 10.125 & 2.854 \\ \hline
+1 & 800x1000 & 1000x900 & 20 & 400.633 & 405.424 \\ \hline
+2 & 800x1000 & 1000x900 & 20 & 405.383 & 207.365 \\ \hline
+3 & 800x1000 & 1000x900 & 20 & 403.715 & 136.386 \\ \hline
+4 & 800x1000 & 1000x900 & 20 & 400.152 & 110.150 \\ \hline
+\end{tabular}
+\end{table}
+
+\par По полученным данным можно сделать вывод, что параллельная реализация алгоритма умножения разреженных матриц выполняется быстрее последовательного
+
+\newpage
+% Заключение
+\section*{Заключение}
+\addcontentsline{toc}{section}{Заключение}
+\par В результате лабораторной работы было выполнено:
+\begin{enumerate}
+\item Разработана труктура хранения разреженной матрицы;
+\item Разработан алгоритм перемножения матриц;
+\item Проверено на работоспособность с помощью библиотеки модульного тестирования Google Testing Framework.
+\end{enumerate}
+\par Основной задачей данной лабораторной работы была реализация параллельной версии, которая должна была быть эффективнее последовательной. Эта задача была успешно достигнута, о чем говорят результаты экспериментов, проведенных в ходе работы. Они показывают, что параллельный вариант работает действительно быстрее, чем последовательный.
+\newpage
+
+% Литература
+\begin{thebibliography}{1}
+\addcontentsline{toc}{section}{Список литературы}
+\bibitem{Gergel} Гергель В. П. Теория и практика параллельных вычислений. – 2007. 
+\bibitem{Intel} Intuit: Академия Intel: Intel Parallel Programming Professional (Introduction) [Электронный ресурс] // URL: \url { https://intuit.ru/studies/courses/4447/983/lecture/14931} (дата обращения: 11.12.2020)
+\bibitem{Parallel} Parallel: Лаборатория Параллельных информационных технологий НИВЦ МГУ [Электронный ресурс] // URL: \url {https://parallel.ru/vvv/mpi.html} (дата обращения: 11.12.2020)
+
+\end{thebibliography}
+
+\newpage
+% Приложение - код
+\section*{Приложение}
+\addcontentsline{toc}{section}{Приложение}
+\begin{lstlisting}
+// sparse_matrix_col.h
+
+
+// Copyright 2020 Sozinov Alex
+#ifndef MODULES_TASK_3_SOZINOV_A_SPARSE_MATRIX_COL_SPARSE_MATRIX_COL_H_
+#define MODULES_TASK_3_SOZINOV_A_SPARSE_MATRIX_COL_SPARSE_MATRIX_COL_H_
+
+#include <vector>
+#include <iostream>
+
+struct ComprColStorage {
+  int countRow;
+  int countCol;
+  std::vector<double> value;
+  std::vector<int> startPos;  // starting vector position (vector value) for i column
+  std::vector<int> numberRow;  // number Row for element std::vector value
+
+  bool operator==(const ComprColStorage& sec) const;
+  bool operator!=(const ComprColStorage& sec) const;
+};
+
+ComprColStorage GenerateMatrix(int countRow, int countCol, double proc);
+ComprColStorage GetSequentialSolution(ComprColStorage *first, ComprColStorage *second);
+ComprColStorage GetParalSolution(ComprColStorage *first, ComprColStorage *second);
+double Sum(const ComprColStorage &first, const ComprColStorage &second, int curRow, int curCol, int size);
+void PrintMatr(const ComprColStorage &matr);
+#endif  // MODULES_TASK_3_SOZINOV_A_SPARSE_MATRIX_COL_SPARSE_MATRIX_COL_H_
+\end{lstlisting}
+
+
+\begin{lstlisting}
+
+// sparse_matrix_col.cpp
+
+
+// Copyright 2020 Sozinov Alex
+
+#include <mpi.h>
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <vector>
+#include "../../modules/task_3/sozinov_a_sparse_matrix_col/sparse_matrix_col.h"
+
+ComprColStorage GenerateMatrix(int countRow, int countCol, double proc) {
+  int countElem = std::ceil(countRow * countCol * proc / 100);
+  ComprColStorage Matr {
+    countRow,
+    countCol,
+    std::vector<double>(countElem, 0),
+    std::vector<int> (countCol + 1, 0),
+    std::vector<int> (countElem, -1)
+  };
+
+  std::random_device dev;
+  std::mt19937 ger(dev());
+  std::uniform_real_distribution<> realDist(-100, 100);
+  std::uniform_int_distribution<> intColDist(0, countCol - 1);
+  std::uniform_int_distribution<> intRowDist(0, countRow - 1);
+
+  // Generate elements
+  int curElem = 0;
+  while (curElem < countElem) {
+    double elem = realDist(ger);
+    if (elem != 0) {
+      Matr.value[curElem] = elem;
+      ++curElem;
+    }
+  }
+
+  // Generate col
+  curElem = 0;
+  while (curElem < countElem) {
+    int col = intColDist(ger);
+    if (Matr.startPos[col + 1] - Matr.startPos[col] < countRow) {
+      for (int j = col + 1; j < countCol + 1; ++j) {
+        ++Matr.startPos[j];
+      }
+      ++curElem;
+    }
+  }
+
+  // Generate row
+  for (int curCol = 0; curCol < countCol; ++curCol) {
+    int index = Matr.startPos[curCol];
+    while (index < Matr.startPos[curCol + 1]) {
+      int row = intRowDist(ger);
+      bool F = true;
+      for (int curPos = Matr.startPos[curCol]; curPos < index && F; ++curPos) {
+        if (Matr.numberRow[curPos] == row)
+          F = false;
+      }
+      if (F) {
+        Matr.numberRow[index] = row;
+        ++index;
+      }
+    }
+    std::vector<int>::iterator startIt = Matr.numberRow.begin() + Matr.startPos[curCol];
+    std::vector<int>::iterator endIt = Matr.numberRow.begin() + Matr.startPos[curCol + 1];
+    std::sort(startIt, endIt);
+  }
+  MPI_Bcast(Matr.value.data(), Matr.value.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  MPI_Bcast(Matr.numberRow.data(), Matr.numberRow.size(), MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(Matr.startPos.data(), Matr.startPos.size(), MPI_INT, 0, MPI_COMM_WORLD);
+  return Matr;
+}
+
+ComprColStorage GetSequentialSolution(ComprColStorage *first, ComprColStorage *second) {
+  if (first->countCol == 0 || first->countRow == 0 || second->countCol == 0 || second->countRow == 0)
+    return ComprColStorage();
+  if (first->countCol != second->countRow)
+    return ComprColStorage();
+  ComprColStorage resMatr{
+    first->countRow,
+    second->countCol,
+    std::vector<double>(),
+    std::vector<int>(second->countCol + 1, 0),
+    std::vector<int>()
+  };
+  for (int curCol = 0; curCol < resMatr.countCol; ++curCol) {
+    for (int curRow = 0; curRow < resMatr.countRow; ++curRow) {
+      double curSum = Sum(*first, *second, curRow, curCol, first->countCol);
+      if (curSum != 0) {
+        resMatr.value.push_back(curSum);
+        resMatr.numberRow.push_back(curRow);
+        for (size_t i = curCol + 1; i < resMatr.startPos.size(); ++i) {
+          ++resMatr.startPos[i];
+        }
+      }
+    }
+  }
+
+  return resMatr;
+}
+
+ComprColStorage GetParalSolution(ComprColStorage *first, ComprColStorage *second) {
+  if (first->countCol == 0 || first->countRow == 0 || second->countCol == 0 || second->countRow == 0)
+    return ComprColStorage();
+  if (first->countCol != second->countRow)
+    return ComprColStorage();
+  ComprColStorage resMatr {
+    first->countRow,
+    second->countCol,
+    std::vector<double>(),
+    std::vector<int>(second->countCol + 1, 0),
+    std::vector<int>()
+  };
+
+  int ProcCount;
+  int ProcRank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
+  MPI_Comm_size(MPI_COMM_WORLD, &ProcCount);
+  int offset = resMatr.countCol / ProcCount;
+  std::vector<int> countColInProc(ProcCount, offset);
+
+  for (int i = 0; i < resMatr.countCol % ProcCount; ++i)
+    ++countColInProc[i];
+  if (resMatr.countCol % ProcCount)
+    ++offset;
+  std::vector<int> globCol(ProcCount, 0);
+  for (int i = 1; i < ProcCount; ++i) {
+    globCol[i] = globCol[i - 1] + countColInProc[i - 1];
+  }
+  ComprColStorage locMatr{
+    resMatr.countRow,
+    countColInProc[ProcRank],
+    std::vector<double>(),
+    std::vector<int>(locMatr.countCol + 1, 0),
+    std::vector<int>()
+  };
+  int count = 0;
+  for (int curCol = 0; curCol < locMatr.countCol; ++curCol) {
+    for (int curRow = 0; curRow < locMatr.countRow; ++curRow) {
+      double curSum = Sum(*first, *second, curRow, globCol[ProcRank] + curCol, first->countCol);
+      if (curSum != 0) {
+        ++count;
+        locMatr.value.push_back(curSum);
+        locMatr.numberRow.push_back(curRow);
+        for (size_t i = curCol + 1; i < locMatr.startPos.size(); ++i)
+          ++locMatr.startPos[i];
+      }
+    }
+  }
+  int locElem = locMatr.value.size();
+  std::vector<int> countElem(ProcCount, 0);
+  int totalCountElem;
+
+  MPI_Allgather(&locElem, 1, MPI_INT, &countElem[0], 1, MPI_INT, MPI_COMM_WORLD);
+  MPI_Allreduce(&locElem, &totalCountElem, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+  resMatr.numberRow = std::vector<int>(totalCountElem, 0);
+  resMatr.value = std::vector<double>(totalCountElem, 0);
+  std::vector<int> offsetValueAndNumRow(ProcCount, 0);
+  std::vector<int> offsetStartPos(ProcCount, 0);
+  for (int i = 1; i < ProcCount; ++i) {
+    offsetValueAndNumRow[i] = offsetValueAndNumRow[i - 1] + countElem[i - 1];
+    offsetStartPos[i] = offsetStartPos[i - 1] + countColInProc[i - 1];
+  }
+
+  MPI_Gatherv(locMatr.startPos.data(), countColInProc[ProcRank], MPI_INT,
+    resMatr.startPos.data(), &countColInProc[0], &offsetStartPos[0], MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(locMatr.numberRow.data(), countElem[ProcRank], MPI_INT,
+    resMatr.numberRow.data(), &countElem[0], &offsetValueAndNumRow[0], MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Gatherv(locMatr.value.data(), countElem[ProcRank], MPI_DOUBLE,
+    resMatr.value.data(), &countElem[0], &offsetValueAndNumRow[0], MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+  if (ProcRank == 0) {
+    int curStartPos = locMatr.startPos[countColInProc[0]];
+    int curCol = countColInProc[0];
+    for (int i = 1; i < ProcCount; ++i) {
+      for (int j = 0; j < countColInProc[i]; ++j) {
+        resMatr.startPos[curCol++] += curStartPos;
+      }
+      curStartPos = curStartPos + countElem[i];
+    }
+    resMatr.startPos[resMatr.countCol] = totalCountElem;
+  }
+
+  return resMatr;
+}
+
+double Sum(const ComprColStorage& first, const ComprColStorage& second, int curRow, int curCol, int size) {
+  int distCol = 0;
+  int startPosCol = second.startPos[curCol];
+  int endPosCol = second.startPos[curCol + 1];
+  double sum = 0;
+  double firstV = 0;
+  double secondV = 0;
+
+  // calculate
+  for (int i = 0; i < size; ++i) {
+    // find value in second matrix
+    if ((startPosCol + distCol < endPosCol) && (second.numberRow[startPosCol + distCol] == i)) {
+      secondV = second.value[startPosCol + distCol++];
+    }
+
+    // find value in first matrix
+    for (int j = first.startPos[i]; j < first.startPos[i + 1] && firstV == 0; ++j) {
+      if (first.numberRow[j] == curRow) {
+        firstV = first.value[j];
+      }
+    }
+    sum += firstV * secondV;
+    firstV = 0;
+    secondV = 0;
+  }
+  return sum;
+}
+
+void PrintMatr(const ComprColStorage& matr) {
+  printf("countRow - %i\n countCol - %i\n", matr.countRow, matr.countCol);
+  printf("startPos: ");
+  for (size_t i = 0; i < matr.startPos.size(); ++i)
+    printf("%i\t", matr.startPos[i]);
+  printf("\nnumberRow: ");
+  for (size_t i = 0; i < matr.numberRow.size(); ++i)
+    printf("%i\t", matr.numberRow[i]);
+  printf("\nvalue: ");
+  for (size_t i = 0; i < matr.value.size(); ++i)
+    printf("%f\t", matr.value[i]);
+  printf("\n");
+}
+
+bool ComprColStorage::operator==(const ComprColStorage& sec) const {
+  if (this->countRow != sec.countRow || this->countCol != sec.countCol)
+    return false;
+  if (this->value.size() != sec.value.size() ||
+    this->startPos.size() != sec.startPos.size() || this->numberRow.size() != sec.numberRow.size())
+    return false;
+  for (size_t i = 0; i < this->startPos.size(); ++i) {
+    if (this->startPos[i] != sec.startPos[i])
+      return false;
+  }
+  for (size_t i = 0; i < this->value.size(); ++i) {
+    if (this->value[i] != sec.value[i] || this->numberRow[i] != sec.numberRow[i])
+      return false;
+  }
+
+  return true;
+}
+
+bool ComprColStorage::operator!=(const ComprColStorage& sec) const {
+  return !(*this == sec);
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+
+// main.cpp
+
+
+// Copyright 2020 Sozinov Alex
+#include <gtest-mpi-listener.hpp>
+#include <gtest/gtest.h>
+#include <mpi.h>
+#include <vector>
+#include "./sparse_matrix_col.h"
+
+TEST(Produce_Matrix, can_create_random_matrix) {
+  ASSERT_NO_THROW(GenerateMatrix(10, 10, 20.0));
+}
+
+TEST(Produce_Matrix, can_compare_matrix1) {
+  int countRow1 = 80;
+  int countCol1 = 20;
+  int countRow2 = 20;
+  int countCol2 = 90;
+
+  double perc = 40;
+  ComprColStorage FirstMatr = GenerateMatrix(countRow1, countCol1, perc);
+  ComprColStorage SecondMatr = GenerateMatrix(countRow2, countCol2, perc);
+  ASSERT_NE(FirstMatr, SecondMatr);
+}
+
+TEST(Produce_Matrix, can_compare_matrix2) {
+  ComprColStorage FirstMatr = GenerateMatrix(10, 10, 20.0);
+  ASSERT_EQ(FirstMatr, FirstMatr);
+}
+
+TEST(Produce_Matrix, test_produce80x20_20x90) {
+  int countRow1 = 80;
+  int countCol1 = 20;
+  int countRow2 = 20;
+  int countCol2 = 90;
+  double perc = 50;
+
+  int ProcRank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
+  ComprColStorage FirstMatr = GenerateMatrix(countRow1, countCol1, perc);
+  ComprColStorage SecondMatr = GenerateMatrix(countRow2, countCol2, perc);
+
+  double start1 = MPI_Wtime();
+  ComprColStorage resMatr = GetSequentialSolution(&FirstMatr, &SecondMatr);
+  double end1 = MPI_Wtime();
+  double start2 = MPI_Wtime();
+  ComprColStorage resMatr2 = GetParalSolution(&FirstMatr, &SecondMatr);
+  double end2 = MPI_Wtime();
+
+  if (ProcRank == 0) {
+    printf("\nSequential - %f\nParallel - %f\n", end1 - start1, end2 - start2);
+    ASSERT_EQ(resMatr, resMatr2);
+  }
+}
+
+TEST(Produce_Matrix, test_produce400x160_160x300) {
+  int countRow1 = 400;
+  int countCol1 = 160;
+  int countRow2 = 260;
+  int countCol2 = 300;
+  double perc = 17.0;
+
+  int ProcRank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
+  ComprColStorage FirstMatr = GenerateMatrix(countRow1, countCol1, perc);
+  ComprColStorage SecondMatr = GenerateMatrix(countRow2, countCol2, perc);
+
+  double start1 = MPI_Wtime();
+  ComprColStorage resMatr = GetSequentialSolution(&FirstMatr, &SecondMatr);
+  double end1 = MPI_Wtime();
+  double start2 = MPI_Wtime();
+  ComprColStorage resMatr2 = GetParalSolution(&FirstMatr, &SecondMatr);
+  double end2 = MPI_Wtime();
+
+  if (ProcRank == 0) {
+    printf("\nSequential - %f\nParallel - %f\n", end1 - start1, end2 - start2);
+    ASSERT_EQ(resMatr, resMatr2);
+  }
+}
+
+TEST(Produce_Matrix, test_produce300x150_150x200) {
+  int countRow1 = 300;
+  int countCol1 = 150;
+  int countRow2 = 150;
+  int countCol2 = 200;
+  double perc = 10.5;
+
+  int ProcRank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
+  ComprColStorage FirstMatr = GenerateMatrix(countRow1, countCol1, perc);
+  ComprColStorage SecondMatr = GenerateMatrix(countRow2, countCol2, perc);
+
+  double start1 = MPI_Wtime();
+  ComprColStorage resMatr = GetSequentialSolution(&FirstMatr, &SecondMatr);
+  double end1 = MPI_Wtime();
+  double start2 = MPI_Wtime();
+  ComprColStorage resMatr2 = GetParalSolution(&FirstMatr, &SecondMatr);
+  double end2 = MPI_Wtime();
+
+  if (ProcRank == 0) {
+    printf("\nSequential - %f\nParallel - %f\n", end1 - start1, end2 - start2);
+    ASSERT_EQ(resMatr, resMatr2);
+  }
+}
+
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  MPI_Init(&argc, &argv);
+
+  ::testing::AddGlobalTestEnvironment(new GTestMPIListener::MPIEnvironment);
+  ::testing::TestEventListeners& listeners =
+      ::testing::UnitTest::GetInstance()->listeners();
+
+  listeners.Release(listeners.default_result_printer());
+  listeners.Release(listeners.default_xml_generator());
+
+  listeners.Append(new GTestMPIListener::MPIMinimalistPrinter);
+  return RUN_ALL_TESTS();
+}
+\end{lstlisting}
+
+\end{document}

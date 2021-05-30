@@ -1,0 +1,1554 @@
+\documentclass{report}
+
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{luainputenc}
+\usepackage[english, russian]{babel}
+\usepackage[pdftex]{hyperref}
+\usepackage[14pt]{extsizes}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{indentfirst}
+
+\geometry{a4paper,top=2cm,bottom=3cm,left=2cm,right=1.5cm}
+\setlength{\parskip}{0.5cm}
+\setlist{nolistsep, itemsep=0.3cm,parsep=0pt}
+
+\lstset{language=C++,
+		basicstyle=\footnotesize,
+		keywordstyle=\color{blue}\ttfamily,
+		stringstyle=\color{red}\ttfamily,
+		commentstyle=\color{green}\ttfamily,
+		morecomment=[l][\color{magenta}]{\#}, 
+		tabsize=4,
+		breaklines=true,
+  		breakatwhitespace=true,
+  		title=\lstname,       
+}
+
+\makeatletter
+\renewcommand\@biblabel[1]{#1.\hfil}
+\makeatother
+
+\begin{document}
+
+\begin{titlepage}
+
+\begin{center}Министерство образования и науки Российской Федерации 
+Федеральное государственное автономное образовательное учреждение 
+высшего образования \\ Национальный исследовательский 
+Нижегородский государственный университет им. Н.И. Лобачевского 
+Институт информационных технологий, математики и механики
+
+\vspace{8em}
+\textbf{\LargeОтчет по лабораторной работе "Сортировка Хоара с четно-нечетным слиянием Батчера"} \end{center}
+
+\vspace{8em}
+
+\begin{flushright}  \textbf{Выполнил:} \\ студент группы 381808-1  \\ Созинов А.П. \end{flushright}
+\begin{flushright}  \textbf{Проверил:}  \\ доцент кафедры МОСТ, \\ кандидат технических наук \\ Сысоев А. В.\\ \end{flushright}
+
+\vspace{\fill}
+\begin{center} Нижний Новгород  2020г \end{center}
+\end{titlepage}
+
+\setcounter{page}{2}
+
+% Содержание
+\tableofcontents
+
+\newpage
+% Введение
+\section*{Введение}
+\addcontentsline{toc}{section}{Введение}
+
+
+\newpage
+% Постановка задачи
+\section*{Постановка задачи}
+\addcontentsline{toc}{section}{Постановка задачи}
+\par В данной работе необходимо реализовать сортировку с четно-нечетным слиянием Батчера.
+Работа должна содержать последовательный и параллельные варианты данной 
+задачи с использованием следующих технологий:
+\begin{enumerate}
+\item OpenMP
+\item TBB
+\item std::threads
+\end{enumerate}
+\par На основе разработанной программы необходимо провести вычислительные эксперименты, сравнив
+время работы последовательной и параллельных версий и сделать вывод об эффективности.
+
+\newpage
+
+% Описание алгоритма
+\section*{Описание алгоритма}
+\addcontentsline{toc}{section}{Описание алгоритма}
+\par Сортировка Хоара (быстрая сортировка) - при упорядочивании вектора из n элементов имеет сложность в среднем О(n*log(n)). Общая идея алгоритма: 
+\begin{enumerate}
+\item Выбрать опорный элемент массива
+\item Сравнить остальные элементы с опорным и переставить их так, чтобы разбить массив на 2 непрерывных отрезка:
+"меньшие опорного", "равные и больше"
+\item Рекурсивно повторять для отрезков для каждой из частей, пока длина отрезка больше 1
+\end{enumerate}
+\par Собираем получившийся вектор из k отсортированных частей в результирующий вектор путем четно-нечетного слияния Бэтчера
+\newpage
+
+% Схема распараллеливания
+\section*{Схема распараллеливания}
+\addcontentsline{toc}{section}{Схема распараллеливания}
+\par Для каждого потока выделяется участок, на котором он будет работать. Для этого создадим вектор, в котором будут
+храниться индексы начала и конца блока для каждого потока. 
+\par Длины участков должны отличаться не более чем на 1.
+\par Каждый процесс получает свою часть на сортировку.
+\par Далее последовательно производим слияние на одном потоке в результирующий вектор.
+
+\newpage
+
+% Описание программной реализации
+\section*{Описание программной реализации}
+\addcontentsline{toc}{section}{Описание программной реализации}
+В программе имеются следующие функции и структуры
+\begin{enumerate}
+
+\item Enum для реализации четно-нечетного слияния
+\begin{lstlisting}
+	enum EvenOdd {
+	  Even,
+	  Odd
+	};
+\end{lstlisting}
+\item Функция создания вектора со случайными значениями
+\begin{lstlisting}
+	std::vector<double> GetRandomVector(int size);
+\end{lstlisting}
+
+\item Функция сортировки вектора
+\begin{lstlisting}
+	void Sort(std::vector<double>* vector, int begin, int end);
+\end{lstlisting}
+
+\item Функция разбиения вектора на вектор четных или нечетных индексов
+\begin{lstlisting}
+	void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type);
+\end{lstlisting}
+
+\item Функция слияния
+\begin{lstlisting}
+	void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right);
+\end{lstlisting}
+
+\item Последовательная сортировка со слиянием
+\begin{lstlisting}
+	void SeqSort(std::vector<double>* vector);
+\end{lstlisting}
+
+\item Параллельная сортировка со слиянием
+\begin{lstlisting}
+	void ParSort(std::vector<double>* vector, unsigned int numThreads = 1);
+\end{lstlisting}
+
+\item Функция заполнения массива индексов
+\begin{lstlisting}
+	void FillOffset(std::vector<int>* offset, const int size, const int count);
+\end{lstlisting}
+
+\item Функция получения максимального количества потоков
+\begin{lstlisting}
+	unsigned int GetMaxNumThreads(const unsigned int numThread);
+\end{lstlisting}
+
+\item Функция параллельного слияния методом Бэтчера
+\begin{lstlisting}
+	void BatcherMergePar(std::vector<double>* vector, const std::vector<double>& even, const std::vector<double>& odd);
+\end{lstlisting}
+\end{enumerate}
+\newpage
+
+% Подтверждение корректности
+\section*{Подтверждение корректности}
+\addcontentsline{toc}{section}{Подтверждение корректности}
+\par Для подтверждения корректности работы алгоритма представлен набор тестов, разработанных с помощью Google Testing Framework
+\par Набор состоит из тестов, проверяющих:
+\begin{enumerate}
+\item Возможность сортировки
+\item корректность сортировки (результирующий вектор
+сравнивается с результатом выполнения std::sort)
+\item Время выполнение в сравнении с последовательной версией
+\end{enumerate}
+\par Успешное прохождение всех тестов доказывает корректность работы разработанного алгоритма
+
+% Результаты экспериментов
+\section*{Результаты экспериментов}
+\addcontentsline{toc}{section}{Результаты экспериментов}
+Эксперименты проводились на устройстве со следующей конфигурацией:
+\begin{enumerate}
+\item Процессор: Intel Core i5-2410M, 2300 МГц, ядер - 2;
+\item Оперативная память:  8Гб, DDR3;
+\item ОС: Windows 10;
+\end{enumerate}
+ Результаты экспериментов приведены в таблице:
+
+\begin{table}[!h]
+\caption{Результаты вычислительных экспериментов}
+\centering
+\begin{tabular}{ | l | l | l | l  | l | l | }
+\hline
+Процессы & Длина вектора & Последовательно & openMP & TBB & std::threads \\ \hline
+1 & 900000 & 0.191348 & 0.197548 & 0.212854 & 0.192548\\ \hline
+2 & 900000 & 0.185825 & 0.162227 & 0.159763 & 0.146565\\ \hline
+3 & 900000 & 0.197321 & 0.176381 & 0.163696 & 0.159156\\ \hline
+4 & 900000 & 0.198627 & 0.146482 & 0.149632 & 0.152144\\ \hline
+1 & 3000000 & 0.662968 & 0.672924 & 0.684508 & 0.608287\\ \hline
+2 & 3000000 & 0.720109 & 0.601449 & 0.542192 & 0.517002\\ \hline
+3 & 3000000 & 0.859134 & 0.680754 & 0.564114 & 0.545960\\ \hline
+4 & 3000000 & 0.649904 & 0.421964 & 0.457864 & 0.483401\\ \hline
+1 & 9000000 & 2.06273 & 2.17651 & 2.15102 & 2.191129\\ \hline
+2 & 9000000 & 2.03406 & 1.67482 & 1.61368 & 1.767106\\ \hline
+3 & 9000000 & 2.12963 & 1.72861 & 1.73522 & 1.742607\\ \hline
+4 & 9000000 & 2.13366 & 1.46283 & 1.51867 & 1.58328\\ \hline
+\end{tabular}
+\end{table}
+
+\par По полученным данным можно сделать вывод, что параллельная реализация алгоритма быстрее последовательного.
+
+\newpage
+% Заключение
+\section*{Заключение}
+\addcontentsline{toc}{section}{Заключение}
+\par В результате лабораторной работы было выполнено:
+\begin{enumerate}
+\item Разработан алгоритм сортировки Хоара
+\item Разработан алгоритм четно-нечетного слияния Бэтчера
+\item Разработан алгоритм сортировки с четно-нечетным слиянием Бэтчера;
+\item Выполнено распараллеливания алгоритма с использованием OpenMP, TBB и std::threads
+\item Проверено на работоспособность с помощью библиотеки модульного тестирования Google Testing Framework.
+\end{enumerate}
+\par Основной задачей данной лабораторной работы была реализация параллельной версии, которая должна была быть эффективнее последовательной. Эта задача была успешно достигнута, о чем говорят результаты экспериментов, проведенных в ходе работы. Они показывают, что параллельный вариант работает действительно быстрее, чем последовательный.
+\newpage
+
+% Литература
+\begin{thebibliography}{1}
+\addcontentsline{toc}{section}{Список литературы}
+\bibitem{Parallel} Parallel: Что такое OpenMP [Электронный ресурс] // URL: \url { https://parallel.ru/tech/tech_dev/openmp.html} (дата обращения: 10.05.2021)
+\bibitem{Intel} Intel: Документация по TBB [Электронный ресурс] // URL: \url {https://software.intel.com/content/www/ru/ru/develop/articles/tbb_async_io.html} (дата обращения: 21.05.2021)
+
+\end{thebibliography}
+
+\newpage
+% Приложение - код
+\section*{Приложение}
+\addcontentsline{toc}{section}{Приложение}
+\begin{lstlisting}
+// Sequense
+//  hoare_batcher.h
+
+
+// Copyright 2021 Sozinov Alex
+
+#ifndef MODULES_TASK_1_SOZINOV_A_HOARE_BATCHER_HOARE_BATCHER_H_
+#define MODULES_TASK_1_SOZINOV_A_HOARE_BATCHER_HOARE_BATCHER_H_
+
+#include <vector>
+
+enum EvenOdd {
+  Even,
+  Odd
+};
+
+std::vector<double> GetRandomVector(int size);
+void Sort(std::vector<double>* vector, int begin, int end);
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type);
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right);
+
+#endif  // MODULES_TASK_1_SOZINOV_A_HOARE_BATCHER_HOARE_BATCHER_H_
+
+\end{lstlisting}
+
+
+\begin{lstlisting}
+
+// hoare_batcher.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <random>
+#include <vector>
+#include <algorithm>
+#include "../../../modules/task_1/sozinov_a_hoare_batcher/hoare_batcher.h"
+
+std::vector<double> GetRandomVector(int size) {
+  std::vector<double> genVec;
+  std::random_device dev;
+  std::mt19937 ger(dev());
+  std::uniform_real_distribution<> realDist(-100, 100);
+
+  for (int index = 0; index < size; ++index) {
+    genVec.push_back(realDist(ger));
+  }
+  return genVec;
+}
+
+void Sort(std::vector<double>* vector, int begin, int end) {
+  int first = begin, last = end;
+  double mid = (*vector)[begin + (end - begin) / 2];
+
+  do {
+    while ((*vector)[first] < mid)
+      ++first;
+    while ((*vector)[last] > mid)
+      --last;
+
+    if (first <= last) {
+      if (first < last)
+        std::swap((*vector)[first], (*vector)[last]);
+      ++first;
+      --last;
+    }
+  } while (first <= last);
+
+  if (first < end)
+    Sort(vector, first, end);
+  if (begin < last)
+    Sort(vector, begin, last);
+}
+
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type) {
+  size_t leftIndex, rightIndex;
+  if (type == EvenOdd::Even) {
+    leftIndex = 0;
+    rightIndex = 0;
+  } else {
+    leftIndex = 1;
+    rightIndex = 1;
+  }
+
+  while ((rightIndex < right.size()) && (leftIndex < left.size())) {
+    if (left[leftIndex] <= right[rightIndex]) {
+      (*res).push_back(left[leftIndex]);
+      leftIndex += 2;
+    } else {
+      (*res).push_back(right[rightIndex]);
+      rightIndex += 2;
+    }
+  }
+
+  if (leftIndex >= left.size()) {
+    for (size_t i = rightIndex; i < right.size(); i += 2) {
+      (*res).push_back(right[i]);
+    }
+  } else {
+    for (size_t i = leftIndex; i < left.size(); i += 2) {
+      (*res).push_back(left[i]);
+    }
+  }
+}
+
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right) {
+  std::vector<double> even, odd;
+  even.reserve((left.size() + 1) / 2 + (right.size() + 1) / 2);
+  odd.reserve(left.size() / 2 + right.size() / 2);
+  EvenOddSplit(&even, left, right, EvenOdd::Even);
+  EvenOddSplit(&odd, left, right, EvenOdd::Odd);
+
+  size_t index = 0;
+  for (; index < even.size() && index < odd.size(); ++index) {
+    (*res).push_back(even[index]);
+    (*res).push_back(odd[index]);
+  }
+
+  if (index < odd.size())
+    (*res).insert((*res).end(), odd.begin() + index, odd.end());
+  else if (index < even.size())
+    (*res).insert((*res).end(), even.begin() + index, even.end());
+
+  for (size_t i = 0; i < (*res).size() - 1; ++i) {
+    if ((*res)[i] > (*res)[i + 1]) {
+      std::swap((*res)[i], (*res)[i + 1]);
+    }
+  }
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+
+// main.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <gtest/gtest.h>
+#include <vector>
+#include <algorithm>
+#include "./hoare_batcher.h"
+
+TEST(GetRandomVector, get_vector) {
+  ASSERT_NO_THROW(GetRandomVector(100));
+}
+
+TEST(GetRandomVector, vector_have_correct_size) {
+  std::vector<double> vect = GetRandomVector(100);
+  ASSERT_EQ(static_cast<int>(vect.size()), 100);
+}
+
+TEST(Sort, can_sort) {
+  std::vector<double> vect = GetRandomVector(100);
+  ASSERT_NO_THROW(Sort(&vect, 0, vect.size() - 1));
+}
+
+TEST(Sort, correct_sort_100) {
+  std::vector<double> vect = GetRandomVector(100);
+  std::vector<double> copy = vect;
+  std::sort(copy.begin(), copy.end());
+  Sort(&vect, 0, vect.size() - 1);
+  ASSERT_EQ(copy, vect);
+}
+
+TEST(Sort, correct_sort_41) {
+  std::vector<double> vect = GetRandomVector(41);
+  std::vector<double> copy = vect;
+  std::sort(copy.begin(), copy.end());
+  Sort(&vect, 0, vect.size() - 1);
+  ASSERT_EQ(copy, vect);
+}
+
+TEST(BatcherMerge, corerct_batcher) {
+  std::vector<double> res;
+  std::vector<double> vectL = GetRandomVector(13);
+  std::vector<double> vectR = GetRandomVector(13);
+  std::vector<double> copy = vectL;
+
+  copy.insert(copy.end(), vectR.begin(), vectR.end());
+  std::sort(copy.begin(), copy.end());
+
+  Sort(&vectL, 0, vectL.size() - 1);
+  Sort(&vectR, 0, vectR.size() - 1);
+  BatcherMerge(&res, vectL, vectR);
+  ASSERT_EQ(copy, res);
+}
+
+TEST(BatcherMerge, corerct_batcher_dif_size) {
+  std::vector<double> res;
+  std::vector<double> vectL = GetRandomVector(11);
+  std::vector<double> vectR = GetRandomVector(13);
+  std::vector<double> copy = vectL;
+
+  copy.insert(copy.end(), vectR.begin(), vectR.end());
+  std::sort(copy.begin(), copy.end());
+
+  Sort(&vectL, 0, vectL.size() - 1);
+  Sort(&vectR, 0, vectR.size() - 1);
+  BatcherMerge(&res, vectL, vectR);
+  ASSERT_EQ(copy, res);
+}
+
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+// OpenMP
+//  hoare_batcher_omp.h
+
+
+// Copyright 2021 Sozinov Alex
+
+#ifndef MODULES_TASK_2_SOZINOV_A_HOARE_BATCHER_OMP_HOARE_BATCHER_OMP_H_
+#define MODULES_TASK_2_SOZINOV_A_HOARE_BATCHER_OMP_HOARE_BATCHER_OMP_H_
+
+#include <vector>
+
+enum EvenOdd {
+  Even,
+  Odd
+};
+
+std::vector<double> GetRandomVector(int size);
+void Sort(std::vector<double>* vector, int begin, int end);
+void SeqSort(std::vector<double>* vector);
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+  const std::vector<double>& right, EvenOdd type);
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right);
+void ParSort(std::vector<double>* vector, unsigned int numThreads = 1);
+void FillOffset(std::vector<int>* offset, const int size, const int count);
+unsigned int GetMaxNumThreads(const unsigned int numThread);
+
+#endif  // MODULES_TASK_2_SOZINOV_A_HOARE_BATCHER_OMP_HOARE_BATCHER_OMP_H_
+
+\end{lstlisting}
+
+
+\begin{lstlisting}
+
+// hoare_batcher_omp.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include "../../../modules/task_2/sozinov_a_hoare_batcher_omp/hoare_batcher_omp.h"
+#include <omp.h>
+#include <algorithm>
+#include <random>
+#include <utility>
+#include <iostream>
+#include <vector>
+
+std::vector<double> GetRandomVector(int size) {
+  std::vector<double> genVec;
+  std::random_device dev;
+  std::mt19937 ger(dev());
+  std::uniform_real_distribution<> realDist(-100, 100);
+
+  for (int index = 0; index < size; ++index) {
+    genVec.push_back(realDist(ger));
+  }
+  return genVec;
+}
+
+void Sort(std::vector<double>* vector, int begin, int end) {
+  int first = begin, last = end;
+  double mid = (*vector)[begin + (end - begin) / 2];
+
+  do {
+    while ((*vector)[first] < mid)
+      ++first;
+    while ((*vector)[last] > mid)
+      --last;
+
+    if (first <= last) {
+      if (first < last)
+        std::swap((*vector)[first], (*vector)[last]);
+      ++first;
+      --last;
+    }
+  } while (first <= last);
+
+  if (first < end)
+    Sort(vector, first, end);
+  if (begin < last)
+    Sort(vector, begin, last);
+}
+
+void SeqSort(std::vector<double>* vector) {
+  std::vector<double> left(vector->begin(), vector->begin() + vector->size() / 2);
+  std::vector<double> right(vector->begin() + vector->size() / 2, vector->end());
+  Sort(&left, 0, left.size() - 1);
+  Sort(&right, 0, right.size() - 1);
+
+  vector->clear();
+  BatcherMerge(vector, left, right);
+}
+
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+  const std::vector<double>& right, EvenOdd type) {
+  size_t leftIndex, rightIndex;
+  if (type == EvenOdd::Even) {
+    leftIndex = 0;
+    rightIndex = 0;
+  } else {
+    leftIndex = 1;
+    rightIndex = 1;
+  }
+
+  while ((rightIndex < right.size()) && (leftIndex < left.size())) {
+    if (left[leftIndex] <= right[rightIndex]) {
+      (*res).push_back(left[leftIndex]);
+      leftIndex += 2;
+    } else {
+      (*res).push_back(right[rightIndex]);
+      rightIndex += 2;
+    }
+  }
+
+  if (leftIndex >= left.size()) {
+    for (size_t i = rightIndex; i < right.size(); i += 2) {
+      (*res).push_back(right[i]);
+    }
+  } else {
+    for (size_t i = leftIndex; i < left.size(); i += 2) {
+      (*res).push_back(left[i]);
+    }
+  }
+}
+
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right) {
+  std::vector<double> even, odd;
+  size_t leftB = res->size();
+  even.reserve((left.size() + 1) / 2 + (right.size() + 1) / 2);
+  odd.reserve(left.size() / 2 + right.size() / 2);
+  EvenOddSplit(&even, left, right, EvenOdd::Even);
+  EvenOddSplit(&odd, left, right, EvenOdd::Odd);
+
+  size_t indexL = 0, indexR = 0;
+  while (indexL < even.size() && indexR < odd.size()) {
+    if (even[indexL] < odd[indexR]) {
+      (*res).push_back(even[indexL]);
+      ++indexL;
+    } else {
+      (*res).push_back(odd[indexR]);
+      ++indexR;
+    }
+  }
+
+  if (indexR < odd.size())
+    (*res).insert((*res).end(), odd.begin() + indexR, odd.end());
+  else if (indexL < even.size())
+    (*res).insert((*res).end(), even.begin() + indexL, even.end());
+
+  for (size_t i = leftB; i < (*res).size() - 1; ++i) {
+    if ((*res)[i] > (*res)[i + 1]) {
+      std::swap((*res)[i], (*res)[i + 1]);
+    }
+  }
+}
+
+void ParSort(std::vector<double>* vector, unsigned int numThreads) {
+  numThreads = GetMaxNumThreads(numThreads);
+  if (vector->size() == 1)
+    return;
+  if (vector->size() < numThreads) {
+    Sort(vector, 0, vector->size() - 1);
+    return;
+  }
+
+  std::vector<int> offset(numThreads, 0);
+  std::vector<double> resVec = std::vector<double>(vector->size(), 0), locVec;
+  FillOffset(&offset, vector->size(), numThreads);
+
+  omp_set_num_threads(numThreads);
+
+#pragma omp parallel private(locVec) shared(vector, offset)
+  {
+    int numThread = omp_get_thread_num();
+    locVec = std::vector<double>(offset[numThread + 1] - offset[numThread], 0);
+    std::copy(vector->begin() + offset[numThread], vector->begin() + offset[numThread + 1], locVec.begin());
+    Sort(&locVec, 0, static_cast<int>(locVec.size() - 1));
+
+#pragma omp critical
+    {
+      std::copy(locVec.begin(), locVec.end(), resVec.begin() + offset[numThread]);
+    }
+  }
+
+  unsigned int mergeNumThreads = (numThreads + numThreads % 2) / 2;
+  if (mergeNumThreads < 1 || numThreads == 1) {
+    *vector = std::vector<double>(resVec);
+    return;
+  }
+
+  while (mergeNumThreads >= 1) {
+    omp_set_num_threads(mergeNumThreads);
+    std::vector<double> left, right;
+    vector->clear();
+
+#pragma omp parallel private(left, right) shared(resVec, vector)
+    {
+      int numThread = omp_get_thread_num();
+      int leftB = offset[2 * numThread], rightB = offset[2 * numThread + 2];
+      int mid = offset[2 * numThread + 1];
+
+      std::copy(resVec.begin() + leftB, resVec.begin() + mid, std::back_inserter(left));
+      std::copy(resVec.begin() + mid, resVec.begin() + rightB, std::back_inserter(right));
+#pragma omp critical
+      {
+        BatcherMerge(vector, left, right);
+      }
+    }
+    offset = std::vector<int>(mergeNumThreads);
+    FillOffset(&offset, vector->size(), mergeNumThreads);
+    resVec = std::vector<double>(*vector);
+    mergeNumThreads /= 2;
+  }
+}
+
+void FillOffset(std::vector<int>* offset, const int size, const int count) {
+  int del = size % count;
+  (*offset)[0] = 0;
+  for (int i = 1; i < count; ++i) {
+    int curSize = (i < del) ? size / count + 1 : size / count;
+    (*offset)[i] = offset->at(i - 1) + curSize;
+  }
+  offset->push_back(size);
+}
+
+unsigned int GetMaxNumThreads(const unsigned int numThread) {
+  unsigned int res = 1;
+  while (res * 2 <= numThread)
+    res *= 2;
+  return res;
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+
+// main.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <gtest/gtest.h>
+#include <omp.h>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include "./hoare_batcher_omp.h"
+
+TEST(GetRandomVector, get_vector) {
+  ASSERT_NO_THROW(GetRandomVector(100));
+}
+
+TEST(GetRandomVector, vector_have_correct_size) {
+  std::vector<double> vect = GetRandomVector(100);
+  ASSERT_EQ(static_cast<int>(vect.size()), 100);
+}
+
+TEST(Sort, can_sort_one_thread) {
+  std::vector<double> vect = GetRandomVector(100);
+  ASSERT_NO_THROW(ParSort(&vect, 1));
+}
+
+TEST(Sort, can_sort_four_thread) {
+  std::vector<double> vect = GetRandomVector(100);
+  ASSERT_NO_THROW(ParSort(&vect, 4));
+}
+
+TEST(Sort, correct_sort_10000) {
+  std::vector<double> vect = GetRandomVector(10000);
+  std::vector<double> copy = vect;
+  std::vector<double> par_vect = vect;
+  std::sort(copy.begin(), copy.end());
+  double seq_start = omp_get_wtime();
+  SeqSort(&vect);
+  double seq_end = omp_get_wtime();
+
+  double par_start = omp_get_wtime();
+  ParSort(&par_vect, 1);
+  double par_end = omp_get_wtime();
+
+  std::cout << "vector size = " << vect.size() << std::endl;
+  std::cout << "Seq: " << seq_end - seq_start << std::endl;
+  std::cout << "Par: " << par_end - par_start << std::endl;
+
+  ASSERT_EQ(copy, vect);
+  ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_900000) {
+  std::vector<double> vect = GetRandomVector(900000);
+  std::vector<double> copy = vect;
+  std::vector<double> par_vect = vect;
+  std::sort(copy.begin(), copy.end());
+  double seq_start = omp_get_wtime();
+  SeqSort(&vect);
+  double seq_end = omp_get_wtime();
+
+  double par_start = omp_get_wtime();
+  ParSort(&par_vect, 4);
+  double par_end = omp_get_wtime();
+
+  std::cout << "vector size = " << vect.size() << std::endl;
+  std::cout << "Seq: " << seq_end - seq_start << std::endl;
+  std::cout << "Par: " << par_end - par_start << std::endl;
+
+  ASSERT_EQ(copy, vect);
+  ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_100000) {
+  std::vector<double> vect = GetRandomVector(100000);
+  std::vector<double> copy = vect;
+  std::vector<double> par_vect = vect;
+  std::sort(copy.begin(), copy.end());
+  double seq_start = omp_get_wtime();
+  SeqSort(&vect);
+  double seq_end = omp_get_wtime();
+
+  double par_start = omp_get_wtime();
+  ParSort(&par_vect, 3);
+  double par_end = omp_get_wtime();
+
+  std::cout << "vector size = " << vect.size() << std::endl;
+  std::cout << "Seq: " << seq_end - seq_start << std::endl;
+  std::cout << "Par: " << par_end - par_start << std::endl;
+
+  ASSERT_EQ(copy, vect);
+  ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_3000000) {
+  std::vector<double> vect = GetRandomVector(3000000);
+  std::vector<double> copy = vect;
+  std::vector<double> par_vect = vect;
+  std::sort(copy.begin(), copy.end());
+  double seq_start = omp_get_wtime();
+  SeqSort(&vect);
+  double seq_end = omp_get_wtime();
+
+  double par_start = omp_get_wtime();
+  ParSort(&par_vect, 4);
+  double par_end = omp_get_wtime();
+
+  std::cout << "vector size = " << vect.size() << std::endl;
+  std::cout << "Seq: " << seq_end - seq_start << std::endl;
+  std::cout << "Par: " << par_end - par_start << std::endl;
+
+  ASSERT_EQ(copy, vect);
+  ASSERT_EQ(copy, par_vect);
+}
+
+int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+
+\end{lstlisting}
+
+\begin{lstlisting}
+// TBB
+//  hoare_batcher_tbb.h
+
+
+// Copyright 2021 Sozinov Alex
+
+#ifndef MODULES_TASK_3_SOZINOV_A_HOARE_BATCHER_TBB_HOARE_BATCHER_TBB_H_
+#define MODULES_TASK_3_SOZINOV_A_HOARE_BATCHER_TBB_HOARE_BATCHER_TBB_H_
+
+#include <vector>
+
+enum EvenOdd {
+  Even,
+  Odd
+};
+
+std::vector<double> GetRandomVector(int size);
+void Sort(std::vector<double>* vector, int begin, int end);
+void SeqSort(std::vector<double>* vector);
+void ParSort(std::vector<double>* vector, unsigned int numThreads = 1);
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type);
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right);
+void BatcherMergePar(std::vector<double>* vector, const std::vector<double>& even, const std::vector<double>& odd);
+void FillOffset(std::vector<int>* offset, const int size, const int count);
+
+#endif  // MODULES_TASK_3_SOZINOV_A_HOARE_BATCHER_TBB_HOARE_BATCHER_TBB_H_
+
+\end{lstlisting}
+
+
+\begin{lstlisting}
+
+// hoare_batcher_tbb.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include "../../../modules/task_3/sozinov_a_hoare_batcher_tbb/hoare_batcher_tbb.h"
+#include <tbb/tbb.h>
+#include <algorithm>
+#include <random>
+#include <utility>
+#include <iostream>
+#include <vector>
+
+std::vector<double> GetRandomVector(int size) {
+  std::vector<double> genVec;
+  std::random_device dev;
+  std::mt19937 ger(dev());
+  std::uniform_real_distribution<> realDist(-100, 100);
+
+  genVec.reserve(size);
+  for (int index = 0; index < size; ++index) {
+    genVec.push_back(realDist(ger));
+  }
+  return genVec;
+}
+
+void Sort(std::vector<double>* vector, int begin, int end) {
+  int first = begin, last = end;
+  double mid = (*vector)[begin + (end - begin) / 2];
+
+  do {
+    while ((*vector)[first] < mid)
+      ++first;
+    while ((*vector)[last] > mid)
+      --last;
+
+    if (first <= last) {
+      if (first < last)
+        std::swap((*vector)[first], (*vector)[last]);
+      ++first;
+      --last;
+    }
+  } while (first <= last);
+
+  if (first < end)
+    Sort(vector, first, end);
+  if (begin < last)
+    Sort(vector, begin, last);
+}
+
+void SeqSort(std::vector<double>* vector) {
+  tbb::tick_count sort_start = tbb::tick_count::now();
+  std::vector<double> left(vector->begin(), vector->begin() + vector->size() / 2);
+  std::vector<double> right(vector->begin() + vector->size() / 2, vector->end());
+  Sort(&left, 0, left.size() - 1);
+  Sort(&right, 0, right.size() - 1);
+
+  tbb::tick_count sort_end = tbb::tick_count::now();
+  tbb::tick_count merge_start = tbb::tick_count::now();
+  vector->clear();
+  BatcherMerge(vector, left, right);
+  tbb::tick_count merge_end = tbb::tick_count::now();
+  std::cout << std::endl << "-------------SEQUENTIAL---------------" << std::endl;
+  std::cout << "vector size = " << vector->size() << std::endl;
+  std::cout << "SORT: " << (sort_end - sort_start).seconds() << std::endl;
+  std::cout << "MERGE: " << (merge_end - merge_start).seconds() << std::endl << std::endl;
+}
+
+void ParSort(std::vector<double>* vector, unsigned int numThreads) {
+  if (vector->size() == 1)
+    return;
+  if (vector->size() < numThreads) {
+    Sort(vector, 0, vector->size() - 1);
+    return;
+  }
+
+  tbb::tick_count sort_start = tbb::tick_count::now();
+  std::vector<int> offset(numThreads, 0);
+  std::vector<double> resVec = *vector, locVec;
+  FillOffset(&offset, vector->size(), numThreads);
+
+  tbb::task_scheduler_init initTaskScheduler(numThreads);
+  tbb::parallel_for(tbb::blocked_range<size_t>(0, numThreads, 1),
+            [offset, &resVec](const tbb::blocked_range<size_t>& r) {
+              for (size_t i = r.begin(); i != r.end(); ++i) {
+                // int numThread = tbb::this_task_arena::current_thread_index();
+                Sort(&resVec, offset[i], offset[i + 1] - 1);
+              }
+    }, tbb::simple_partitioner());
+
+  unsigned int mergeNumThreads = (numThreads + numThreads % 2) / 2;
+  if (mergeNumThreads < 1 || numThreads == 1) {
+    *vector = std::vector<double>(resVec);
+    return;
+  }
+
+  tbb::tick_count sort_end = tbb::tick_count::now();
+  tbb::tick_count merge_start = tbb::tick_count::now();
+  vector->clear();
+    for (unsigned int index = 0; index < numThreads; ++index) {
+      std::vector<double> left, right;
+      right = std::vector<double>(offset[index + 1] - offset[index], 0);
+      std::copy(resVec.begin() + offset[index], resVec.begin() + offset[index + 1], right.begin());
+
+      BatcherMergePar(vector, left, right);
+    }
+  tbb::tick_count merge_end = tbb::tick_count::now();
+  std::cout << "-------------PARALLEL---------------" << std::endl;
+  std::cout << "vector size = " << vector->size() << std::endl;
+  std::cout << "SORT: " << (sort_end - sort_start).seconds() << std::endl;
+  std::cout << "MERGE: " << (merge_end - merge_start).seconds() << std::endl << std::endl;
+}
+
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type) {
+  size_t leftIndex, rightIndex;
+  if (type == EvenOdd::Even) {
+    leftIndex = 0;
+    rightIndex = 0;
+  } else {
+    leftIndex = 1;
+    rightIndex = 1;
+  }
+
+  while ((rightIndex < right.size()) && (leftIndex < left.size())) {
+    if (left[leftIndex] <= right[rightIndex]) {
+      (*res).push_back(left[leftIndex]);
+      leftIndex += 2;
+    } else {
+      (*res).push_back(right[rightIndex]);
+      rightIndex += 2;
+    }
+  }
+
+  if (leftIndex >= left.size()) {
+    for (size_t i = rightIndex; i < right.size(); i += 2) {
+      (*res).push_back(right[i]);
+    }
+  } else {
+    for (size_t i = leftIndex; i < left.size(); i += 2) {
+      (*res).push_back(left[i]);
+    }
+  }
+}
+
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right) {
+  std::vector<double> even, odd;
+  even.reserve((left.size() + 1) / 2 + (right.size() + 1) / 2);
+  odd.reserve(left.size() / 2 + right.size() / 2);
+  EvenOddSplit(&even, left, right, EvenOdd::Even);
+  EvenOddSplit(&odd, left, right, EvenOdd::Odd);
+
+  size_t index = 0;
+  for (; index < even.size() && index < odd.size(); ++index) {
+    (*res).push_back(even[index]);
+    (*res).push_back(odd[index]);
+  }
+
+  if (index < odd.size())
+    (*res).insert((*res).end(), odd.begin() + index, odd.end());
+  else if (index < even.size())
+    (*res).insert((*res).end(), even.begin() + index, even.end());
+
+  for (size_t i = 0; i < (*res).size() - 1; ++i) {
+    if ((*res)[i] > (*res)[i + 1]) {
+      std::swap((*res)[i], (*res)[i + 1]);
+    }
+  }
+}
+
+void BatcherMergePar(std::vector<double>* vector, const std::vector<double>& even, const std::vector<double>& odd) {
+  size_t indexV = 0;
+  std::vector<double> resVec;
+  size_t indexL = 0, indexR = 0;
+
+  while (indexL < vector->size() && indexR < odd.size()) {
+    if (vector->at(indexL) < odd[indexR])
+      resVec.push_back(vector->at(indexL++));
+    else
+      resVec.push_back(odd[indexR++]);
+  }
+
+  if (indexR < odd.size())
+    resVec.insert(resVec.end(), odd.begin() + indexR, odd.end());
+  if (indexV < vector->size())
+    resVec.insert(resVec.end(), vector->begin() + indexL, vector->end());
+
+  *vector = resVec;
+  for (size_t i = 0; i < (*vector).size() - 1; ++i) {
+    if ((*vector)[i] > (*vector)[i + 1]) {
+      std::swap((*vector)[i], (*vector)[i + 1]);
+    }
+  }
+}
+
+void FillOffset(std::vector<int>* offset, const int size, const int count) {
+  int del = size % count;
+  (*offset)[0] = 0;
+  for (int i = 1; i < count; ++i) {
+    int curSize = (i < del) ? size / count + 1 : size / count;
+    (*offset)[i] = offset->at(i - 1) + curSize;
+  }
+  offset->push_back(size);
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+
+// main.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <gtest/gtest.h>
+#include <tbb/tbb.h>
+#include <vector>
+#include <algorithm>
+#include <iostream>
+#include "./hoare_batcher_tbb.h"
+
+TEST(GetRandomVector, get_vector) {
+    ASSERT_NO_THROW(GetRandomVector(100));
+}
+
+TEST(GetRandomVector, vector_have_correct_size) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_EQ(static_cast<int>(vect.size()), 100);
+}
+
+TEST(Sort, can_sort_one_thread) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_NO_THROW(ParSort(&vect, 1));
+}
+
+TEST(Sort, can_sort_four_thread) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_NO_THROW(ParSort(&vect, 4));
+}
+
+TEST(Sort, correct_sort_10000) {
+    std::vector<double> vect = GetRandomVector(100);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    tbb::tick_count seq_start = tbb::tick_count::now();
+    SeqSort(&vect);
+    tbb::tick_count seq_end = tbb::tick_count::now();
+
+    tbb::tick_count par_start = tbb::tick_count::now();
+    ParSort(&par_vect, 1);
+    tbb::tick_count par_end = tbb::tick_count::now();
+
+    std::cout << "vector size = " << copy.size() << std::endl;
+    std::cout << "Seq: time: " << (seq_end - seq_start).seconds()
+              << "\tresult vector size: " << vect.size() << std::endl;
+    std::cout << "Par: time: " << (par_end - par_start).seconds()
+              << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_900000) {
+    std::vector<double> vect = GetRandomVector(900);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    tbb::tick_count seq_start = tbb::tick_count::now();
+    SeqSort(&vect);
+    tbb::tick_count seq_end = tbb::tick_count::now();
+
+    tbb::tick_count par_start = tbb::tick_count::now();
+    ParSort(&par_vect, 4);
+    tbb::tick_count par_end = tbb::tick_count::now();
+
+    std::cout << "vector size = " << copy.size() << std::endl;
+    std::cout << "Seq: time: " << (seq_end - seq_start).seconds()
+              << "\tresult vector size: " << vect.size() << std::endl;
+    std::cout << "Par: time: " << (par_end - par_start).seconds()
+              << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_1000000) {
+    std::vector<double> vect = GetRandomVector(100);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    tbb::tick_count seq_start = tbb::tick_count::now();
+    SeqSort(&vect);
+    tbb::tick_count seq_end = tbb::tick_count::now();
+
+    tbb::tick_count par_start = tbb::tick_count::now();
+    ParSort(&par_vect, 4);
+    tbb::tick_count par_end = tbb::tick_count::now();
+
+    std::cout << "vector size = " << copy.size() << std::endl;
+    std::cout << "Seq: time: " << (seq_end - seq_start).seconds()
+              << "\tresult vector size: " << vect.size() << std::endl;
+    std::cout << "Par: time: " << (par_end - par_start).seconds()
+              << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_3000000) {
+    std::vector<double> vect = GetRandomVector(300);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    tbb::tick_count seq_start = tbb::tick_count::now();
+    SeqSort(&vect);
+    tbb::tick_count seq_end = tbb::tick_count::now();
+
+    tbb::tick_count par_start = tbb::tick_count::now();
+    ParSort(&par_vect, 2);
+    tbb::tick_count par_end = tbb::tick_count::now();
+
+    std::cout << "vector size = " << copy.size() << std::endl;
+    std::cout << "Seq: time: " << (seq_end - seq_start).seconds()
+              << "\tresult vector size: " << vect.size() << std::endl;
+    std::cout << "Par: time: " << (par_end - par_start).seconds()
+              << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+\end{lstlisting}
+
+\begin{lstlisting}
+// std::threads
+//  hoare_batcher_std.h
+
+
+// Copyright 2021 Sozinov Alex
+
+// Copyright 2021 Sozinov Alex
+
+#ifndef MODULES_TASK_4_SOZINOV_A_HOARE_BATCHER_STD_HOARE_BATCHER_STD_H_
+#define MODULES_TASK_4_SOZINOV_A_HOARE_BATCHER_STD_HOARE_BATCHER_STD_H_
+
+#include <vector>
+
+enum EvenOdd {
+  Even,
+  Odd
+};
+
+std::vector<double> GetRandomVector(int size);
+void Sort(std::vector<double>* vector, int begin, int end);
+void SeqSort(std::vector<double>* vector);
+void ParSort(std::vector<double>* vector, unsigned int numThreads = 1);
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type);
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right);
+void BatcherMergePar(std::vector<double>* vector, const std::vector<double>& even, const std::vector<double>& odd);
+void FillOffset(std::vector<int>* offset, const int size, const int count);
+
+#endif   // MODULES_TASK_4_SOZINOV_A_HOARE_BATCHER_STD_HOARE_BATCHER_STD_H_
+
+\end{lstlisting}
+
+
+\begin{lstlisting}
+
+// hoare_batcher_std.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <algorithm>
+#include <random>
+#include <utility>
+#include <iostream>
+#include <vector>
+#include "../../../3rdparty/unapproved/unapproved.h"
+#include "../../../modules/task_4/sozinov_a_hoare_batcher_std/hoare_batcher_std.h"
+
+std::vector<double> GetRandomVector(int size) {
+  std::vector<double> genVec;
+  std::random_device dev;
+  std::mt19937 ger(dev());
+  std::uniform_real_distribution<> realDist(-100, 100);
+
+  genVec.reserve(size);
+  for (int index = 0; index < size; ++index) {
+    genVec.push_back(realDist(ger));
+  }
+  return genVec;
+}
+
+void Sort(std::vector<double>* vector, int begin, int end) {
+  int first = begin, last = end;
+  double mid = (*vector)[begin + (end - begin) / 2];
+
+  do {
+    while ((*vector)[first] < mid)
+      ++first;
+    while ((*vector)[last] > mid)
+      --last;
+
+    if (first <= last) {
+      if (first < last)
+        std::swap((*vector)[first], (*vector)[last]);
+      ++first;
+      --last;
+    }
+  } while (first <= last);
+
+  if (first < end)
+    Sort(vector, first, end);
+  if (begin < last)
+    Sort(vector, begin, last);
+}
+
+void SeqSort(std::vector<double>* vector) {
+  std::vector<double> left(vector->begin(), vector->begin() + vector->size() / 2);
+  std::vector<double> right(vector->begin() + vector->size() / 2, vector->end());
+  Sort(&left, 0, left.size() - 1);
+  Sort(&right, 0, right.size() - 1);
+
+  vector->clear();
+  BatcherMerge(vector, left, right);
+}
+
+void ParSort(std::vector<double>* vector, unsigned int numThreads) {
+  if (vector->size() == 1)
+    return;
+  if (vector->size() < numThreads) {
+    Sort(vector, 0, vector->size() - 1);
+    return;
+  }
+
+  std::vector<int> offset(numThreads, 0);
+  std::vector<double> resVec = *vector, locVec;
+  FillOffset(&offset, vector->size(), numThreads);
+
+  std::vector<std::thread> threads;
+  threads.reserve(numThreads);
+  for (size_t index = 0; index < numThreads; ++index) {
+      threads.emplace_back(std::thread([&offset, &resVec, index] {
+          Sort(&resVec, offset[index], offset[index + 1] - 1);
+      }));
+  }
+  for (size_t index = 0; index < threads.size(); ++index) {
+      threads[index].join();
+  }
+
+  unsigned int mergeNumThreads = (numThreads + numThreads % 2) / 2;
+  if (mergeNumThreads < 1 || numThreads == 1) {
+    *vector = std::vector<double>(resVec);
+    return;
+  }
+
+  vector->clear();
+    for (unsigned int index = 0; index < numThreads; ++index) {
+      std::vector<double> left, right;
+      right = std::vector<double>(offset[index + 1] - offset[index], 0);
+      std::copy(resVec.begin() + offset[index], resVec.begin() + offset[index + 1], right.begin());
+
+      BatcherMergePar(vector, left, right);
+    }
+}
+
+void EvenOddSplit(std::vector<double>* res, const std::vector<double>& left,
+                  const std::vector<double>& right, EvenOdd type) {
+  size_t leftIndex, rightIndex;
+  if (type == EvenOdd::Even) {
+    leftIndex = 0;
+    rightIndex = 0;
+  } else {
+    leftIndex = 1;
+    rightIndex = 1;
+  }
+
+  while ((rightIndex < right.size()) && (leftIndex < left.size())) {
+    if (left[leftIndex] <= right[rightIndex]) {
+      (*res).push_back(left[leftIndex]);
+      leftIndex += 2;
+    } else {
+      (*res).push_back(right[rightIndex]);
+      rightIndex += 2;
+    }
+  }
+
+  if (leftIndex >= left.size()) {
+    for (size_t i = rightIndex; i < right.size(); i += 2) {
+      (*res).push_back(right[i]);
+    }
+  } else {
+    for (size_t i = leftIndex; i < left.size(); i += 2) {
+      (*res).push_back(left[i]);
+    }
+  }
+}
+
+void BatcherMerge(std::vector<double>* res, const std::vector<double>& left, const std::vector<double>& right) {
+  std::vector<double> even, odd;
+  even.reserve((left.size() + 1) / 2 + (right.size() + 1) / 2);
+  odd.reserve(left.size() / 2 + right.size() / 2);
+  EvenOddSplit(&even, left, right, EvenOdd::Even);
+  EvenOddSplit(&odd, left, right, EvenOdd::Odd);
+
+  size_t index = 0;
+  for (; index < even.size() && index < odd.size(); ++index) {
+    (*res).push_back(even[index]);
+    (*res).push_back(odd[index]);
+  }
+
+  if (index < odd.size())
+    (*res).insert((*res).end(), odd.begin() + index, odd.end());
+  else if (index < even.size())
+    (*res).insert((*res).end(), even.begin() + index, even.end());
+
+  for (size_t i = 0; i < (*res).size() - 1; ++i) {
+    if ((*res)[i] > (*res)[i + 1]) {
+      std::swap((*res)[i], (*res)[i + 1]);
+    }
+  }
+}
+
+void BatcherMergePar(std::vector<double>* vector, const std::vector<double>& even, const std::vector<double>& odd) {
+  size_t indexV = 0;
+  std::vector<double> resVec;
+  size_t indexL = 0, indexR = 0;
+
+  while (indexL < vector->size() && indexR < odd.size()) {
+    if (vector->at(indexL) < odd[indexR])
+      resVec.push_back(vector->at(indexL++));
+    else
+      resVec.push_back(odd[indexR++]);
+  }
+
+  if (indexR < odd.size())
+    resVec.insert(resVec.end(), odd.begin() + indexR, odd.end());
+  if (indexV < vector->size())
+    resVec.insert(resVec.end(), vector->begin() + indexL, vector->end());
+
+  *vector = resVec;
+  for (size_t i = 0; i < (*vector).size() - 1; ++i) {
+    if ((*vector)[i] > (*vector)[i + 1]) {
+      std::swap((*vector)[i], (*vector)[i + 1]);
+    }
+  }
+}
+
+void FillOffset(std::vector<int>* offset, const int size, const int count) {
+  int del = size % count;
+  (*offset)[0] = 0;
+  for (int i = 1; i < count; ++i) {
+    int curSize = (i < del) ? size / count + 1 : size / count;
+    (*offset)[i] = offset->at(i - 1) + curSize;
+  }
+  offset->push_back(size);
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+
+// main.cpp
+
+
+// Copyright 2021 Sozinov Alex
+
+#include <gtest/gtest.h>
+#include <vector>
+#include <algorithm>
+#include <iostream>
+#include "../../../3rdparty/unapproved/unapproved.h"
+#include "./hoare_batcher_std.h"
+
+TEST(GetRandomVector, get_vector) {
+    ASSERT_NO_THROW(GetRandomVector(100));
+}
+
+TEST(GetRandomVector, vector_have_correct_size) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_EQ(static_cast<int>(vect.size()), 100);
+}
+
+TEST(Sort, can_sort_one_thread) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_NO_THROW(ParSort(&vect, 1));
+}
+
+TEST(Sort, can_sort_four_thread) {
+    std::vector<double> vect = GetRandomVector(100);
+    ASSERT_NO_THROW(ParSort(&vect, 4));
+}
+
+TEST(Sort, correct_sort_10000) {
+    std::vector<double> vect = GetRandomVector(100);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    // auto seq_start = std::chrono::high_resolution_clock::now();
+    SeqSort(&vect);
+    // auto seq_end = std::chrono::high_resolution_clock::now();
+    // auto seq_time = std::chrono::duration_cast<std::chrono::microseconds>(seq_end - seq_start).count();
+
+    // auto par_start = std::chrono::high_resolution_clock::now();
+    ParSort(&par_vect, 1);
+    // auto par_end = std::chrono::high_resolution_clock::now();
+    // auto par_time = std::chrono::duration_cast<std::chrono::microseconds>(par_end - par_start).count();
+
+    // std::cout << "vector size = " << copy.size() << std::endl;
+    // std::cout << "Seq: time: " << seq_time
+    //          << "\tresult vector size: " << vect.size() << std::endl;
+    // std::cout << "Par: time: " << par_time
+    //          << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_900000) {
+    std::vector<double> vect = GetRandomVector(900);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    // auto seq_start = std::chrono::high_resolution_clock::now();
+    SeqSort(&vect);
+    // auto seq_end = std::chrono::high_resolution_clock::now();
+    // auto seq_time = std::chrono::duration_cast<std::chrono::microseconds>(seq_end - seq_start).count();
+
+    // auto par_start = std::chrono::high_resolution_clock::now();
+    ParSort(&par_vect, 4);
+    // auto par_end = std::chrono::high_resolution_clock::now();
+    // auto par_time = std::chrono::duration_cast<std::chrono::microseconds>(par_end - par_start).count();
+
+    // std::cout << "vector size = " << copy.size() << std::endl;
+    // std::cout << "Seq: time: " << seq_time
+    //          << "\tresult vector size: " << vect.size() << std::endl;
+    // std::cout << "Par: time: " << par_time
+    //          << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_1000000) {
+    std::vector<double> vect = GetRandomVector(100);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    // auto seq_start = std::chrono::high_resolution_clock::now();
+    SeqSort(&vect);
+    // auto seq_end = std::chrono::high_resolution_clock::now();
+    // auto seq_time = std::chrono::duration_cast<std::chrono::microseconds>(seq_end - seq_start).count();
+
+    // auto par_start = std::chrono::high_resolution_clock::now();
+    ParSort(&par_vect, 4);
+    // auto par_end = std::chrono::high_resolution_clock::now();
+    // auto par_time = std::chrono::duration_cast<std::chrono::microseconds>(par_end - par_start).count();
+
+    // std::cout << "vector size = " << copy.size() << std::endl;
+    // std::cout << "Seq: time: " << seq_time
+    //          << "\tresult vector size: " << vect.size() << std::endl;
+    // std::cout << "Par: time: " << par_time
+    //          << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+TEST(Sort, correct_sort_3000000) {
+    std::vector<double> vect = GetRandomVector(300);
+    std::vector<double> copy = vect;
+    std::vector<double> par_vect = vect;
+    std::sort(copy.begin(), copy.end());
+    // auto seq_start = std::chrono::high_resolution_clock::now();
+    SeqSort(&vect);
+    // auto seq_end = std::chrono::high_resolution_clock::now();
+    // auto seq_time = std::chrono::duration_cast<std::chrono::microseconds>(seq_end - seq_start).count();
+
+    // auto par_start = std::chrono::high_resolution_clock::now();
+    ParSort(&par_vect, 2);
+    // auto par_end = std::chrono::high_resolution_clock::now();
+    // auto par_time = std::chrono::duration_cast<std::chrono::microseconds>(par_end - par_start).count();
+
+    // std::cout << "vector size = " << copy.size() << std::endl;
+    // std::cout << "Seq: time: " << seq_time
+    //          << "\tresult vector size: " << vect.size() << std::endl;
+    // std::cout << "Par: time: " << par_time
+    //          << "\tresult vector size: " << par_vect.size() << std::endl;
+
+    ASSERT_EQ(copy, vect);
+    ASSERT_EQ(copy, par_vect);
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+\end{lstlisting}
+
+\end{document}
